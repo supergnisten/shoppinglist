@@ -5,7 +5,7 @@ Smart handleliste-håndtering med butikk-spesifikk sortering og template-funksjo
 ## 🌐 Live Application
 
 - **Production URL**: [Your Azure Static Web App URL here]
-- **Development**: `https://localhost:7073` (Client) + `http://localhost:7072` (API)
+- **Development**: `https://localhost:7072` (Client) + `http://localhost:7071` (API)
 
 ## � Applikasjonsoversikt
 
@@ -13,7 +13,7 @@ Dette er en **3-lags Blazor WebAssembly applikasjon** for smart handleliste-hån
 
 ### 🏗️ Teknisk Arkitektur
 - **Frontend**: Blazor WebAssembly (.NET 8.0) med Syncfusion UI-komponenter
-- **Backend**: Azure Functions v4 (.NET 8.0) 
+- **Backend**: Azure Functions v4 (.NET 8.0)
 - **Database**: Google Cloud Firestore (produksjon) / In-Memory (utvikling)
 - **Deployment**: Azure Static Web Apps med GitHub Actions
 
@@ -134,6 +134,75 @@ Applikasjonens **unike feature** - sortering basert på fysisk butikklayout:
 
 ## 💻 Development Setup
 
+### Første gang i debug
+
+Repoet bruker .NET 8 og Azure Functions v4. Installer dette før du starter:
+
+- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- [Azure Functions Core Tools v4](https://learn.microsoft.com/azure/azure-functions/functions-run-local)
+- Node.js og npm dersom du skal bruke Static Web Apps CLI eller kjøre E2E-testene
+
+Etter at repoet er klonet:
+
+1. Åpne rotmappen (`shoppinglist`) i VS Code.
+2. Opprett API-innstillingene fra eksempel-filen:
+
+   ```powershell
+   Copy-Item Api/local.settings.example.json Api/local.settings.json
+   ```
+
+   `Api/local.settings.json` er lokal og skal ikke committes. Standardinnstillingene er tilstrekkelige for debug. Ikke legg inn Firestore-nøkler med mindre du uttrykkelig skal teste mot produksjonsdata.
+3. Installer og bygg avhengighetene:
+
+   ```powershell
+   dotnet restore BlazorStaticWebApps.sln
+   dotnet build BlazorStaticWebApps.sln
+   ```
+4. Start API-et i terminal 1:
+
+   ```powershell
+   dotnet build Api/Api.csproj
+   func start --script-root Api/bin/Debug/net8.0
+   ```
+
+   API-et skal være tilgjengelig på `http://localhost:7071`.
+5. Start klienten i terminal 2:
+
+   ```powershell
+   dotnet run --project Client/Client.csproj --launch-profile BlazorApp.Client
+   ```
+
+   Åpne deretter [https://localhost:7072](https://localhost:7072). Godta eventuelt det lokale HTTPS-sertifikatet i nettleseren.
+
+### Viktig om debug-modus
+
+- Klienten kjører med `Development`-miljø og bruker `Client/wwwroot/appsettings.Development.json`, som peker API-kallene til `http://localhost:7071`.
+- API-et bruker minnebaserte repositories når miljøet er `Development` eller `GOOGLE_CREDENTIALS` mangler. Data opprettes derfor på nytt hver gang API-et startes.
+- Klienten bruker `DebugAuthenticationStateProvider` i debug. Lokal innlogging mot Azure Static Web Apps er derfor ikke nødvendig for vanlig utvikling.
+- Ikke slett `Client/wwwroot/appsettings.Development.json`; den inneholder den lokale API-adressen.
+
+### Vanlige førstegangsproblemer
+
+- **Port 7071 er opptatt:** Stopp en annen Functions-host eller endre `LocalHttpPort` i `Api/local.settings.json`. Oppdater også `API_Prefix` i `Client/wwwroot/appsettings.Development.json` hvis API-porten endres.
+- **Klienten får ikke kontakt med API-et:** Start API-et med `func start` først, og kontroller at `http://localhost:7071` svarer. Klienten og API-et må kjøre i separate prosesser.
+- **`func` finnes ikke:** Installer Azure Functions Core Tools v4 og start VS Code på nytt etter installasjonen.
+- **HTTPS-feil på klienten:** Kjør `dotnet dev-certs https --trust` og start klienten på nytt.
+- **Data forsvinner:** Dette er forventet i debug fordi API-et bruker `MemoryGenericRepository`.
+
+### Tester
+
+Kjør enhetstestene fra rotmappen:
+
+```powershell
+dotnet test
+```
+
+E2E-testene forventer at klienten allerede kjører på `https://localhost:7072`:
+
+```powershell
+dotnet test Client.Tests.Playwright/Client.Tests.Playwright.csproj
+```
+
 ### Template Structure
 
 - **Client**: The Blazor WebAssembly sample application
@@ -146,15 +215,15 @@ Applikasjonens **unike feature** - sortering basert på fysisk butikklayout:
 
 1. Open the folder in Visual Studio Code.
 
-1. Delete file `Client/wwwroot/appsettings.Development.json`
+1. Keep `Client/wwwroot/appsettings.Development.json`; it is needed by the normal local debug setup above.
 
-1. In the VS Code terminal, run the following command to start the Static Web Apps CLI, along with the Blazor WebAssembly client application and the Functions API app:
+1. Når klienten og API-et allerede kjører, kan du starte Static Web Apps CLI i VS Code-terminalen:
 
     ```bash
-    swa start http://localhost:5000 --api-location http://localhost:7071
+      swa start https://localhost:7072 --api-location http://localhost:7071
     ```
 
-    The Static Web Apps CLI (`swa`) starts a proxy on port 4280 that will forward static site requests to the Blazor server on port 5000 and requests to the `/api` endpoint to the Functions server. 
+   Static Web Apps CLI (`swa`) starter en proxy på port 4280 og videresender forespørsler til klienten og Functions API-et.
 
 1. Open a browser and navigate to the Static Web Apps CLI's address at `http://localhost:4280`. You'll be able to access both the client application and the Functions API app in this single address. When you navigate to the "Fetch Data" page, you'll see the data returned by the Functions API app.
 
@@ -187,10 +256,10 @@ This application uses Google Cloud Firestore as the production database.
    This allows seamless switching between local development (file path) and cloud deployment (JSON content).
 
 ### Debug vs Production Data
-- **Debug mode** (`#if DEBUG`): Uses `MemoryGenericRepository` with in-memory test data
-- **Production mode**: Uses `GoogleFireBaseGenericRepository` with live Firestore data
+- **Debug mode**: Uses `MemoryGenericRepository` when the environment is `Development` or `GOOGLE_CREDENTIALS` is not set. Data is in-memory and disappears when the API restarts.
+- **Production mode**: Uses `GoogleFireBaseGenericRepository` with live Firestore data when the app is not in `Development` and `GOOGLE_CREDENTIALS` is configured.
 
-Switch between modes by changing the build configuration in `Api/Program.cs`.
+Do not switch this by adding credentials to a normal local debug session; that can make the API connect to live Firestore data.
 
 ## 🚀 Deploy to Azure Static Web Apps
 
